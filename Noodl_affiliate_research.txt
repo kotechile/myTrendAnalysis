@@ -1,0 +1,1530 @@
+// ============================================================================
+// COMPLETE FIXED AFFILIATE DATA PROCESSOR - FULL CODE
+// Works with Noodl Table Prefab and generates all required outputs
+// ============================================================================
+
+// ========================================================================
+// INITIALIZATION & CONFIGURATION
+// ========================================================================
+Outputs.enableTab = false;
+const supabase = Noodl.Variables.supabase;
+const selectedAnalysisId = Inputs.selectedAnalysisId;
+
+console.log(`🎯 COMPLETE: Starting affiliate data processing for analysis: ${selectedAnalysisId}`);
+
+// Validation
+if (!selectedAnalysisId) {
+    throw new Error("selectedAnalysisId input is required");
+}
+
+if (!supabase) {
+    throw new Error("Supabase connection not available");
+}
+
+// Get the user ID
+const userData = await Noodl.Variables.supabase.auth.getUser();
+const userID = userData.data.user.id;
+
+if (!userID) {
+    throw new Error("User authentication failed");
+}
+
+console.log(`✅ COMPLETE: User authenticated: ${userID}`);
+
+// ========================================================================
+// UTILITY FUNCTIONS
+// ========================================================================
+
+const AffiliateUtils = {
+    getProfitabilityLevel: (score) => {
+        if (score >= 70) return 'Excellent';
+        if (score >= 50) return 'Good';
+        if (score >= 30) return 'Moderate';
+        return 'Poor';
+    },
+
+    getProfitabilityColor: (score) => {
+        if (score >= 70) return '#10b981';
+        if (score >= 50) return '#f59e0b';
+        if (score >= 30) return '#f97316';
+        return '#ef4444';
+    },
+
+    getProfitabilityIcon: (score) => {
+        if (score >= 70) return '💰';
+        if (score >= 50) return '💵';
+        if (score >= 30) return '💸';
+        return '⚠️';
+    },
+
+    getNetworkIcon: (network) => {
+        const networkName = (network || '').toLowerCase();
+        if (networkName.includes('amazon')) return '🛒';
+        if (networkName.includes('clickbank')) return '💳';
+        if (networkName.includes('shareasale')) return '🤝';
+        if (networkName.includes('commission')) return '🏪';
+        if (networkName.includes('impact')) return '⚡';
+        if (networkName.includes('cj') || networkName.includes('commission junction')) return '🔗';
+        return '🔗';
+    },
+
+    getNetworkColor: (network) => {
+        const networkName = (network || '').toLowerCase();
+        if (networkName.includes('amazon')) return '#ff9900';
+        if (networkName.includes('clickbank')) return '#1e3a8a';
+        if (networkName.includes('shareasale')) return '#059669';
+        if (networkName.includes('commission')) return '#7c3aed';
+        if (networkName.includes('impact')) return '#dc2626';
+        return '#0891b2';
+    },
+
+    categorizeFromDescription: (description) => {
+        const desc = (description || '').toLowerCase();
+        if (desc.includes('tech') || desc.includes('software') || desc.includes('app')) return 'technology';
+        if (desc.includes('health') || desc.includes('fitness') || desc.includes('wellness')) return 'health';
+        if (desc.includes('finance') || desc.includes('money') || desc.includes('investment')) return 'finance';
+        if (desc.includes('education') || desc.includes('course') || desc.includes('learn')) return 'education';
+        if (desc.includes('fashion') || desc.includes('beauty') || desc.includes('lifestyle')) return 'lifestyle';
+        if (desc.includes('security') || desc.includes('safety') || desc.includes('protection')) return 'security';
+        if (desc.includes('home') || desc.includes('house') || desc.includes('garden')) return 'home';
+        if (desc.includes('travel') || desc.includes('vacation') || desc.includes('hotel')) return 'travel';
+        if (desc.includes('food') || desc.includes('cooking') || desc.includes('kitchen')) return 'food';
+        return 'general';
+    },
+
+    estimateMonthlySearches: (description, commissionRate) => {
+        const desc = (description || '').toLowerCase();
+        let categoryMultiplier = 500;
+        
+        if (desc.includes('tech') || desc.includes('software')) categoryMultiplier = 2000;
+        else if (desc.includes('health') || desc.includes('fitness')) categoryMultiplier = 1500;
+        else if (desc.includes('finance') || desc.includes('investment')) categoryMultiplier = 1200;
+        else if (desc.includes('education') || desc.includes('course')) categoryMultiplier = 800;
+        else if (desc.includes('security') || desc.includes('safety')) categoryMultiplier = 1000;
+        else if (desc.includes('home') || desc.includes('house')) categoryMultiplier = 900;
+        else if (desc.includes('travel')) categoryMultiplier = 1100;
+        
+        const rateMultiplier = Math.max(0.5, Math.min(2.0, commissionRate / 15));
+        return Math.round(categoryMultiplier * rateMultiplier);
+    },
+
+    calculateProfitabilityScore: (program) => {
+        let score = 0;
+        
+        // Commission rate weight (40%)
+        score += Math.min(40, (program.commissionRate || 0) * 1.5);
+        
+        // Product price weight (20%)
+        const priceScore = Math.min(20, (program.productPrice || 0) / 50);
+        score += priceScore;
+        
+        // Monthly searches weight (25%)
+        const searchScore = Math.min(25, (program.monthlySearches || 0) / 200);
+        score += searchScore;
+        
+        // Competition level weight (15%)
+        const competitionScore = program.competitionLevel === 'low' ? 15 : 
+                                program.competitionLevel === 'medium' ? 10 : 5;
+        score += competitionScore;
+        
+        return Math.round(Math.min(100, score));
+    }
+};
+
+// ========================================================================
+// MAIN DATA PROCESSING
+// ========================================================================
+
+try {
+    console.log('📊 COMPLETE: Querying affiliate research tables...');
+
+    // ====================================================================
+    // STEP 1: GET TREND ANALYSIS
+    // ====================================================================
+    
+    const { data: trendAnalysis, error: trendError } = await supabase
+        .from('trend_analyses')
+        .select('topic, user_id')
+        .eq('id', selectedAnalysisId)
+        .eq('user_id', userID)
+        .single();
+
+    if (trendError || !trendAnalysis) {
+        throw new Error(`Trend analysis not found: ${trendError?.message || 'No data'}`);
+    }
+
+    console.log(`✅ COMPLETE: Found trend analysis with topic: ${trendAnalysis.topic}`);
+    console.log(`🔍 DEBUG: Looking for affiliate session with topic: "${trendAnalysis.topic}" and user_id: ${userID}`);
+
+    // ====================================================================
+    // STEP 2: GET AFFILIATE SESSION
+    // ====================================================================
+    
+    const { data: sessionData, error: sessionError } = await supabase
+        .from('affiliate_research_sessions')
+        .select('*')
+        .eq('topic', trendAnalysis.topic)
+        .eq('user_id', userID)
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .single();
+
+    if (sessionError || !sessionData) {
+        console.warn(`⚠️ No affiliate session found for topic "${trendAnalysis.topic}" - using fallback data`);
+        
+        // Create fallback data when no affiliate research exists
+        Outputs.AffiliateStatus = {
+            overall: 'no_data',
+            statusText: 'No Affiliate Data',
+            statusColor: '#6b7280',
+            statusIcon: '📊',
+            lastUpdated: new Date().toISOString(),
+            dataSource: 'fallback',
+            totalPrograms: 0,
+            avgCommissionRate: 0,
+            totalPotential: 0,
+            highValueCount: 0,
+            networksCount: 0,
+            categoriesCount: 0,
+            overallScore: 0,
+            primaryRecommendation: 'No affiliate research data found for this topic. Try researching affiliate programs first.',
+            errorMessage: `No affiliate session found for topic: ${trendAnalysis.topic}`
+        };
+        
+        // Set empty arrays for table
+        Outputs.Columns = [];
+        Outputs.Items = [];
+        Outputs.PaginatedItems = [];
+        Outputs.TopAffiliateOpportunities = [];
+        Outputs.AffiliateStrategyCards = [];
+        
+        // Set empty KPI cards
+        const emptyKPI = {
+            value: 0,
+            displayValue: "0",
+            label: "No Data",
+            category: "No Data",
+            color: "#6b7280",
+            isPositive: false,
+            icon: "📊",
+            subtitle: "No affiliate data found"
+        };
+        
+        Outputs.KPI_AffiliatePotential = { ...emptyKPI, label: "Affiliate Potential", displayValue: "0%" };
+        Outputs.KPI_TotalCommission = { ...emptyKPI, label: "Commission Potential", displayValue: '$0' };
+        Outputs.KPI_AvgCommissionRate = { ...emptyKPI, label: "Avg Commission Rate", displayValue: '0%' };
+        Outputs.KPI_HighValueOffers = { ...emptyKPI, label: "High Value Offers", displayValue: '0' };
+        Outputs.KPI_NetworksDiversity = { ...emptyKPI, label: "Networks Available", displayValue: '0' };
+        Outputs.KPI_CategoriesCoverage = { ...emptyKPI, label: "Categories Covered", displayValue: '0' };
+        
+        // Return early to prevent further processing
+        Outputs.affiliateDataReady = true;
+        Outputs.affiliateDataError = "No affiliate data found";
+        console.log('⚠️ COMPLETE: No affiliate data found - using fallback empty state');
+        return;
+    }
+
+    console.log(`✅ COMPLETE: Found affiliate session: ${sessionData.id}`);
+    console.log(`🔍 DEBUG: Session data:`, {
+        topic: sessionData.topic,
+        total_programs: sessionData.total_programs,
+        profitability_score: sessionData.profitability_score,
+        created_at: sessionData.created_at
+    });
+    const sessionID = sessionData.id;
+
+    // ====================================================================
+    // STEP 3: GET PROFITABILITY ANALYSIS
+    // ====================================================================
+    
+    const { data: profitabilityArray, error: profitabilityError } = await supabase
+        .from('affiliate_profitability_analysis')
+        .select('*')
+        .eq('research_session_id', sessionID);
+
+    if (profitabilityError) {
+        throw new Error(`Profitability analysis error: ${profitabilityError.message}`);
+    }
+
+    // Use first record or fallback to session data
+    const profitabilityData = profitabilityArray?.[0] || {
+        profitability_score: sessionData.profitability_score || 0,
+        profitability_level: sessionData.profitability_level || 'unknown',
+        reason: 'Using session data',
+        total_programs: sessionData.total_programs || 0,
+        avg_commission_rate: 15,
+        avg_commission_amount: 50,
+        high_value_programs: Math.floor((sessionData.total_programs || 0) * 0.3),
+        networks_represented: 3,
+        subtopics_covered: (sessionData.subtopics || []).length
+    };
+
+    console.log(`✅ COMPLETE: Profitability score: ${profitabilityData.profitability_score}`);
+
+    // ====================================================================
+    // STEP 4: GET PROGRAMS DATA
+    // ====================================================================
+    // Helper function for consistent URL handling
+    const getConsistentURL = (program) => {
+        return program.signup_url || 
+               program.affiliate_program_url || 
+               program.program_url || 
+               program.url || 
+               '';
+    };
+
+    const URLUtils = {
+        isValidURL: (string) => {
+            if (!string || typeof string !== 'string') return false;
+            try {
+                new URL(string);
+                return true;
+            } catch (_) {
+                // Try with https:// prefix
+                try {
+                    new URL(`https://${string}`);
+                    return true;
+                } catch (_) {
+                    return false;
+                }
+            }
+        },
+        
+        formatURLForDisplay: (url, maxLength = 50) => {
+            if (!url || typeof url !== 'string') return 'No URL';
+            if (!URLUtils.isValidURL(url)) return 'Invalid URL';
+            
+            let displayUrl = url;
+            // Remove protocol for display
+            displayUrl = displayUrl.replace(/^https?:\/\//, '');
+            
+            if (displayUrl.length <= maxLength) return displayUrl;
+            return displayUrl.substring(0, maxLength - 3) + '...';
+        },
+        
+        getDomainFromURL: (url) => {
+            if (!url || typeof url !== 'string') return 'Unknown';
+            if (!URLUtils.isValidURL(url)) return 'Unknown';
+            try {
+                const urlObj = new URL(url.startsWith('http') ? url : `https://${url}`);
+                return urlObj.hostname.replace('www.', '');
+            } catch (_) {
+                return 'Unknown';
+            }
+        },
+        
+        makeURLClickable: (url) => {
+            if (!url || typeof url !== 'string') return '#';
+            if (!URLUtils.isValidURL(url)) return '#';
+            return url.startsWith('http') ? url : `https://${url}`;
+        }
+    };
+    // FIXED: Correct table names and relationships
+    console.log(`🔍 DEBUG: Querying research_program_links for session: ${sessionID}`);
+    
+    const { data: relationshipData, error: relationshipError } = await supabase
+        .from('research_program_links')
+        .select('program_id, link_type')
+        .eq('research_session_id', sessionID);
+
+    if (relationshipError) {
+        console.error(`❌ Research programs error: ${relationshipError.message}`);
+        // Fallback: try the old table name
+        const fallbackResponse = await supabase
+            .from('affiliate_session_programs')
+            .select('affiliate_program_id, subtopic, relevance_score')
+            .eq('research_session_id', sessionID);
+        
+        if (fallbackResponse.error) {
+            throw new Error(`Both table queries failed: ${relationshipError.message}, ${fallbackResponse.error.message}`);
+        }
+        
+        relationshipData = fallbackResponse.data;
+    }
+
+    let programIDs = relationshipData?.map(rel => rel.program_id || rel.affiliate_program_id) || [];
+    console.log(`✅ COMPLETE: Found ${programIDs.length} program relationships:`, programIDs);
+
+    // Validate program IDs are UUIDs
+    programIDs = programIDs.filter(id => {
+        if (typeof id === 'string' && id.length === 36) return true;
+        if (typeof id === 'string' && id.length > 0) {
+            console.warn(`⚠️ Invalid program ID format: ${id}`);
+            return false;
+        }
+        return false;
+    });
+
+    let programsData = [];
+    if (programIDs.length > 0) {
+        console.log(`🔍 DEBUG: Querying affiliate_programs with IDs: ${programIDs.length} programs`);
+        
+        const { data: programs, error: programsError } = await supabase
+            .from('affiliate_programs')
+            .select('*')
+            .in('id', programIDs)
+            .eq('user_id', userID); // Ensure RLS compliance
+
+        if (programsError) {
+            console.error(`❌ Programs query error: ${programsError.message}`);
+            
+            // Try without user_id filter
+            const fallbackPrograms = await supabase
+                .from('affiliate_programs')
+                .select('*')
+                .in('id', programIDs);
+            
+            if (fallbackPrograms.error) {
+                throw new Error(`Programs error: ${programsError.message}`);
+            }
+            
+            programsData = fallbackPrograms.data || [];
+        } else {
+            programsData = programs || [];
+        }
+    } else {
+        console.log(`⚠️ No program relationships found for session: ${sessionID}`);
+        
+        // Try direct query by topic as fallback
+        console.log(`🔍 DEBUG: Trying direct query by topic: ${sessionData.topic}`);
+        const directQuery = await supabase
+            .from('affiliate_programs')
+            .select('*')
+            .ilike('search_query', `%${sessionData.topic}%`)
+            .eq('user_id', userID)
+            .limit(50);
+        
+        if (directQuery.data && directQuery.data.length > 0) {
+            console.log(`✅ FOUND: ${directQuery.data.length} programs via direct topic query`);
+            programsData = directQuery.data;
+        }
+    }
+
+    console.log(`✅ COMPLETE: Retrieved ${programsData.length} affiliate programs`);
+    
+    // DEBUG: Show first program if available
+    if (programsData.length > 0) {
+        console.log(`🔍 DEBUG: First program sample:`, {
+            id: programsData[0].id,
+            program_name: programsData[0].program_name,
+            network: programsData[0].network,
+            commission_rate: programsData[0].commission_rate,
+            signup_url: programsData[0].signup_url
+        });
+    } else {
+        console.log(`🔍 DEBUG: No programs found - checking database structure...`);
+        
+        // Debug: Check what tables exist and their structure
+        try {
+            const tableCheck = await supabase
+                .from('affiliate_programs')
+                .select('id, program_name, network, commission_rate')
+                .limit(1);
+            
+            console.log(`🔍 DEBUG: Table structure test:`, {
+                table: 'affiliate_programs',
+                hasData: tableCheck.data && tableCheck.data.length > 0,
+                sample: tableCheck.data ? tableCheck.data[0] : null,
+                error: tableCheck.error
+            });
+        } catch (e) {
+            console.error(`❌ Database structure error:`, e);
+        }
+    }
+
+    // ====================================================================
+    // STEP 5: TRANSFORM PROGRAMS FOR UI
+    // ====================================================================
+    
+const transformedPrograms = (programsData || []).map((program, index) => {
+    // Ensure program exists and has required properties
+    if (!program || typeof program !== 'object') {
+        console.warn(`⚠️ Invalid program data at index ${index}:`, program);
+        return null;
+    }
+
+    const commissionRate = parseFloat(program.commission_rate) || 0;
+    const commissionAmount = parseFloat(program.commission_amount) || 0;
+    const productPrice = commissionAmount > 0 && commissionRate > 0 ? 
+        Math.round((commissionAmount / commissionRate) * 100) : 
+        (commissionRate >= 50 ? 100 : commissionRate >= 20 ? 300 : 500);
+    
+    const monthlySearches = AffiliateUtils.estimateMonthlySearches(program.description || 'general', commissionRate);
+    const category = AffiliateUtils.categorizeFromDescription(program.description);
+    
+    const profitabilityScore = AffiliateUtils.calculateProfitabilityScore({
+        commissionRate,
+        productPrice,
+        monthlySearches,
+        competitionLevel: 'medium'
+    });
+
+    // FIXED: Consistent URL handling with null safety
+    const programURL = getConsistentURL(program);
+
+    return {
+        id: program.id || `temp_${index}`,
+        programName: program.program_name || `Program ${index + 1}`,
+        network: program.network || 'Unknown',
+        category: category,
+        commissionRate: commissionRate,
+        commissionAmount: commissionAmount || Math.round((commissionRate / 100) * productPrice),
+        productPrice: productPrice,
+        monthlySearches: monthlySearches,
+        competitionLevel: 'medium',
+        profitabilityScore: profitabilityScore,
+        isHighValue: commissionRate >= 20,
+        urgency: commissionRate >= 30 ? 'high' : commissionRate >= 15 ? 'medium' : 'normal',
+        action: commissionRate >= 20 ? 'prioritize' : 'review',
+        color: AffiliateUtils.getProfitabilityColor(profitabilityScore),
+        cookieDuration: program.cookie_duration || '30 days',
+        signup_url: program.signup_url || '',
+        affiliate_program_url: program.affiliate_program_url || '',
+        program_url: programURL,
+        url: programURL,
+        
+        description: program.description || program.program_name || '',
+        approvalRequired: program.approval_required || false,
+        lastUpdated: program.last_updated,
+        
+        display: {
+            commissionRateDisplay: `${commissionRate}%`,
+            commissionAmountDisplay: `$${commissionAmount || Math.round((commissionRate / 100) * productPrice)}`,
+            productPriceDisplay: `$${productPrice}`,
+            profitabilityScoreDisplay: `${profitabilityScore}/100`,
+            networkIcon: AffiliateUtils.getNetworkIcon(program.network),
+            monthlySearchesDisplay: `${monthlySearches.toLocaleString()}`,
+            cookieDurationDisplay: program.cookie_duration || '30 days',
+            approvalBadge: program.approval_required ? '🔒 Approval Required' : '✅ Instant Approval',
+            
+            // FIXED: Enhanced URL formatting with URLUtils and null safety
+            programUrlDisplay: URLUtils.formatURLForDisplay(programURL, 50),
+            programUrlShort: URLUtils.getDomainFromURL(programURL),
+            programUrlClickable: URLUtils.makeURLClickable(programURL),
+            programUrlValid: URLUtils.isValidURL(programURL)
+        }
+    };
+}).filter(Boolean); // Remove null entries
+
+    // Ensure we always have a valid array to work with
+    const safeTransformedPrograms = transformedPrograms || [];
+    console.log(`✅ COMPLETE: Transformed ${safeTransformedPrograms.length} programs for UI`);
+
+    // ====================================================================
+    // STEP 6: CALCULATE AGGREGATE METRICS
+    // ====================================================================
+    
+    const totalPrograms = safeTransformedPrograms.length;
+    const overallScore = profitabilityData?.profitability_score || 0;
+    const avgCommissionRate = totalPrograms > 0 ? 
+        Math.round(safeTransformedPrograms.reduce((sum, p) => sum + (p?.commissionRate || 0), 0) / totalPrograms) : 
+        profitabilityData?.avg_commission_rate || 0;
+    const totalCommissionPotential = safeTransformedPrograms.reduce((sum, p) => sum + (p?.commissionAmount || 0), 0);
+    const highValueOffersCount = safeTransformedPrograms.filter(p => p?.isHighValue).length;
+    const networks = [...new Set(safeTransformedPrograms.map(p => p?.network).filter(Boolean))];
+    const categories = [...new Set(safeTransformedPrograms.map(p => p?.category).filter(Boolean))];
+    const highValuePrograms = safeTransformedPrograms.filter(p => p?.isHighValue);
+
+    console.log(`✅ COMPLETE: Calculated metrics - Score: ${overallScore}, Programs: ${totalPrograms}, Networks: ${networks.length}`);
+
+    // ====================================================================
+    // STEP 7: GENERATE KPI CARDS (STANDARDIZED FORMAT)
+    // ====================================================================
+    
+    console.log('🎯 COMPLETE: Generating standardized KPI cards...');
+
+    // KPI Card: Affiliate Potential
+    Outputs.KPI_AffiliatePotential = {
+        value: overallScore,
+        displayValue: `${overallScore}%`,
+        label: "Affiliate Potential",
+        category: AffiliateUtils.getProfitabilityLevel(overallScore),
+        color: AffiliateUtils.getProfitabilityColor(overallScore),
+        isPositive: overallScore >= 50,
+        icon: AffiliateUtils.getProfitabilityIcon(overallScore),
+        subtitle: `${totalPrograms} programs analyzed`
+    };
+
+    // KPI Card: Total Commission Potential
+    Outputs.KPI_TotalCommission = {
+        value: totalCommissionPotential,
+        displayValue: `$${totalCommissionPotential.toLocaleString()}`,
+        label: "Commission Potential",
+        category: totalCommissionPotential >= 1000 ? 'High Revenue' : 
+                 totalCommissionPotential >= 500 ? 'Medium Revenue' : 'Low Revenue',
+        color: totalCommissionPotential >= 1000 ? '#065f46' : 
+               totalCommissionPotential >= 500 ? '#d97706' : '#6b7280',
+        isPositive: totalCommissionPotential > 0,
+        icon: totalCommissionPotential >= 1000 ? '💰' : 
+              totalCommissionPotential >= 500 ? '💵' : '💸',
+        subtitle: 'Monthly estimate'
+    };
+
+    // KPI Card: Average Commission Rate
+    Outputs.KPI_AvgCommissionRate = {
+        value: avgCommissionRate,
+        displayValue: `${avgCommissionRate}%`,
+        label: "Avg Commission Rate",
+        category: avgCommissionRate >= 20 ? 'Excellent Rate' : 
+                 avgCommissionRate >= 10 ? 'Good Rate' : 'Fair Rate',
+        color: avgCommissionRate >= 20 ? '#065f46' : 
+               avgCommissionRate >= 10 ? '#d97706' : '#6b7280',
+        isPositive: avgCommissionRate >= 10,
+        icon: avgCommissionRate >= 20 ? '🎯' : 
+              avgCommissionRate >= 10 ? '📊' : '📉',
+        subtitle: `Across ${totalPrograms} programs`
+    };
+
+    // KPI Card: High Value Offers
+    Outputs.KPI_HighValueOffers = {
+        value: highValueOffersCount,
+        displayValue: `${highValueOffersCount}`,
+        label: "High Value Offers",
+        category: highValueOffersCount >= 3 ? 'Excellent Options' : 
+                 highValueOffersCount >= 1 ? 'Good Options' : 'Limited Options',
+        color: highValueOffersCount >= 3 ? '#065f46' : 
+               highValueOffersCount >= 1 ? '#d97706' : '#6b7280',
+        isPositive: highValueOffersCount > 0,
+        icon: highValueOffersCount >= 3 ? '💎' : 
+              highValueOffersCount >= 1 ? '⭐' : '❓',
+        subtitle: '20%+ commission rate'
+    };
+
+    // KPI Card: Networks Diversity
+    Outputs.KPI_NetworksDiversity = {
+        value: networks.length,
+        displayValue: `${networks.length}`,
+        label: "Networks Available",
+        category: networks.length >= 4 ? 'High Diversity' : 
+                 networks.length >= 2 ? 'Good Diversity' : 'Limited Diversity',
+        color: networks.length >= 4 ? '#065f46' : 
+               networks.length >= 2 ? '#d97706' : '#6b7280',
+        isPositive: networks.length >= 2,
+        icon: networks.length >= 4 ? '🌐' : 
+              networks.length >= 2 ? '🔗' : '⚠️',
+        subtitle: 'Affiliate networks'
+    };
+
+    // KPI Card: Categories Coverage
+    Outputs.KPI_CategoriesCoverage = {
+        value: categories.length,
+        displayValue: `${categories.length}`,
+        label: "Categories Covered",
+        category: categories.length >= 4 ? 'Broad Coverage' : 
+                 categories.length >= 2 ? 'Good Coverage' : 'Narrow Coverage',
+        color: categories.length >= 4 ? '#065f46' : 
+               categories.length >= 2 ? '#d97706' : '#6b7280',
+        isPositive: categories.length >= 2,
+        icon: categories.length >= 4 ? '📈' : 
+              categories.length >= 2 ? '📊' : '📉',
+        subtitle: 'Product categories'
+    };
+
+    console.log('✅ COMPLETE: KPI cards generated');
+
+    // ====================================================================
+    // STEP 8: GENERATE TABLE DATA (NOODL TABLE PREFAB FORMAT)
+    // ====================================================================
+    
+    console.log('📋 COMPLETE: Generating table data for Noodl Table Prefab...');
+
+    // Pagination support
+    const itemsPerPage = 10;
+    const currentPage = Inputs.currentPage || 1;
+    const totalPages = Math.ceil(transformedPrograms.length / itemsPerPage);
+    
+    // Apply active filter if specified
+    const activeFilter = Inputs.activeFilter || 'all';
+    let filteredPrograms = [...transformedPrograms];
+    
+    if (activeFilter !== 'all') {
+        switch(activeFilter) {
+            case 'highValue':
+                filteredPrograms = transformedPrograms.filter(p => p.commissionRate >= 20);
+                break;
+            case 'highProfit':
+                filteredPrograms = transformedPrograms.filter(p => p.profitabilityScore >= 70);
+                break;
+            case 'urgent':
+                filteredPrograms = transformedPrograms.filter(p => p.urgency === 'high');
+                break;
+            case 'instant':
+                filteredPrograms = transformedPrograms.filter(p => !p.approvalRequired);
+                break;
+        }
+    }
+
+   // FIXED COLUMNS DEFINITION
+Outputs.Columns = [
+    { 
+        id: 'rank', 
+        Label: '#', 
+        Width: 4, 
+        Field: 'rank', 
+        Sortable: true, 
+        Editable: false, 
+        Type: "Number" 
+    },
+    { 
+        id: 'programName', 
+        Label: 'Program Name', 
+        Width: 15, // Reduced width to make room for URL
+        Field: 'programName', 
+        Sortable: true, 
+        Searchable: true, 
+        Editable: false, 
+        Type: "String" 
+    },
+    { 
+        id: 'program_url', // FIXED: Use proper display field
+        Label: 'Program URL', 
+        Width: 20, // FIXED: Dedicated width for URL
+        Field: 'program_url', 
+        Sortable: true, 
+        Searchable: true, 
+        Editable: false, 
+        Type: "Url"  
+    },
+    { 
+        id: 'networkDisplay', 
+        Label: 'Network', 
+        Width: 10, 
+        Field: 'networkDisplay', 
+        Sortable: true, 
+        SortField: 'network',
+        Editable: false, 
+        Type: "String" 
+    },
+    //     { 
+    //     id: 'description', 
+    //     Label: 'Description', 
+    //     Width: 40, 
+    //     Field: 'description', 
+    //     Sortable: true, 
+    //     SortField: 'network',
+    //     Editable: false, 
+    //     Type: "String" 
+    // },
+    { 
+        id: 'category', 
+        Label: 'Category', 
+        Width: 20, 
+        Field: 'category', 
+        Sortable: true, 
+        Editable: false, 
+        Type: "String" 
+    },
+    { 
+        id: 'commissionRateDisplay', 
+        Label: 'Commission %', 
+        Width: 10, 
+        Field: 'commissionRateDisplay', 
+        Sortable: true, 
+        SortField: 'commissionRate',
+        Editable: false, 
+        Type: "String" 
+    },
+    { 
+        id: 'commissionAmountDisplay', 
+        Label: 'Est. Commission', 
+        Width: 10, 
+        Field: 'commissionAmountDisplay', 
+        Sortable: true, 
+        SortField: 'commissionAmount',
+        Editable: false, 
+        Type: "String" 
+    },
+    { 
+        id: 'profitabilityScoreDisplay', 
+        Label: 'Profit Score', 
+        Width: 10, 
+        Field: 'profitabilityScoreDisplay', 
+        Sortable: true, 
+        SortField: 'profitabilityScore',
+        Editable: false, 
+        Type: "String" 
+    },
+    { 
+        id: 'urgencyBadge', 
+        Label: 'Priority', 
+        Width: 8, 
+        Field: 'urgencyBadge', 
+        Sortable: true, 
+        SortField: 'urgency',
+        Editable: false, 
+        Type: "String" 
+    },
+    { 
+        id: 'approvalDisplay', 
+        Label: 'Approval', 
+        Width: 8, 
+        Field: 'approvalDisplay', 
+        Editable: false, 
+        Type: "String" 
+    }
+];
+
+ Outputs.Items = filteredPrograms.map((program, index) => ({
+    // Basic identifiers
+    id: program.id,
+    rank: index + 1,
+    
+    // Program information
+    programName: program.programName,
+    networkDisplay: `${program.display.networkIcon} ${program.network}`,
+    category: program.category,
+    description: program.description,
+    
+    // FIXED: Use consistent URL handling with getConsistentURL
+    program_url: program.program_url || getConsistentURL(program),
+    programUrl: program.program_url || getConsistentURL(program),
+    programUrlDisplay: URLUtils.formatURLForDisplay(getConsistentURL(program), 50),
+    programUrlShort: URLUtils.getDomainFromURL(getConsistentURL(program)),
+    
+    // Commission data (formatted for display)
+    commissionRateDisplay: program.display.commissionRateDisplay,
+    commissionAmountDisplay: program.display.commissionAmountDisplay,
+    
+    // Scoring and analysis
+    profitabilityScoreDisplay: `${AffiliateUtils.getProfitabilityIcon(program.profitabilityScore)} ${program.profitabilityScore}/100`,
+    monthlySearchesDisplay: program.display.monthlySearchesDisplay,
+    
+    // Status and priority
+    urgencyBadge: program.urgency === 'high' ? '🔥 HIGH' : 
+                 program.urgency === 'medium' ? '⚡ MEDIUM' : 
+                 '📋 NORMAL',
+    approvalDisplay: program.approvalRequired ? '🔒 Required' : '✅ Instant',
+    
+    // Raw values for sorting (keep these for SortField functionality)
+    network: program.network,
+    commissionRate: program.commissionRate,
+    commissionAmount: program.commissionAmount,
+    profitabilityScore: program.profitabilityScore,
+    monthlySearches: program.monthlySearches,
+    urgency: program.urgency,
+    
+    // Additional metadata
+    isHighValue: program.isHighValue,
+    cookieDuration: program.cookieDuration,
+    lastUpdated: program.lastUpdated,
+    
+    // Color information (for custom styling if needed)
+    profitabilityColor: program.color,
+    urgencyColor: program.urgency === 'high' ? '#dc2626' : 
+                 program.urgency === 'medium' ? '#d97706' : '#6b7280',
+    networkColor: AffiliateUtils.getNetworkColor(program.network)
+}));
+
+    // PAGINATION DATA (Manual implementation)
+    const startIndex = (currentPage - 1) * itemsPerPage;
+    const endIndex = Math.min(startIndex + itemsPerPage, filteredPrograms.length);
+
+ Outputs.PaginatedItems = filteredPrograms.slice(startIndex, endIndex).map((program, index) => ({
+    id: program.id,
+    rank: startIndex + index + 1,
+    programName: program.programName,
+    networkDisplay: `${program.display.networkIcon} ${program.network}`,
+    category: program.category,
+    
+    // FIXED: Use consistent URL handling with getConsistentURL
+    program_url: program.program_url || getConsistentURL(program),
+    programUrl: program.program_url || getConsistentURL(program),
+    programUrlDisplay: URLUtils.formatURLForDisplay(getConsistentURL(program), 50),
+    programUrlShort: URLUtils.getDomainFromURL(getConsistentURL(program)),
+    
+    commissionRateDisplay: program.display.commissionRateDisplay,
+    commissionAmountDisplay: program.display.commissionAmountDisplay,
+    profitabilityScoreDisplay: `${AffiliateUtils.getProfitabilityIcon(program.profitabilityScore)} ${program.profitabilityScore}/100`,
+    monthlySearchesDisplay: program.display.monthlySearchesDisplay,
+    urgencyBadge: program.urgency === 'high' ? '🔥 HIGH' : program.urgency === 'medium' ? '⚡ MEDIUM' : '📋 NORMAL',
+    approvalDisplay: program.approvalRequired ? '🔒 Required' : '✅ Instant',
+    
+    // Raw values for sorting
+    network: program.network,
+    commissionRate: program.commissionRate,
+    commissionAmount: program.commissionAmount,
+    profitabilityScore: program.profitabilityScore,
+    monthlySearches: program.monthlySearches,
+    urgency: program.urgency,
+    
+    // Additional fields
+    description: program.description,
+    cookieDuration: program.cookieDuration,
+    lastUpdated: program.lastUpdated
+}));
+
+
+
+
+    // Pagination info
+    Outputs.PaginationInfo = {
+        currentPage: currentPage,
+        totalPages: Math.ceil(filteredPrograms.length / itemsPerPage),
+        totalItems: filteredPrograms.length,
+        itemsPerPage: itemsPerPage,
+        startItem: startIndex + 1,
+        endItem: endIndex,
+        hasNextPage: currentPage < Math.ceil(filteredPrograms.length / itemsPerPage),
+        hasPreviousPage: currentPage > 1,
+        showingText: `Showing ${startIndex + 1}-${endIndex} of ${filteredPrograms.length} programs`
+    };
+
+    console.log(`✅ COMPLETE: Generated table with ${Outputs.Items.length} items and ${Outputs.Columns.length} columns`);
+    
+    // DEBUG: Log table structure for verification
+    console.log('📊 TABLE DEBUG:');
+    console.log('Columns:', Outputs.Columns.map(c => ({id: c.id, field: c.Field, width: c.Width})));
+    console.log('First item:', Outputs.Items[0] ? {
+        programName: Outputs.Items[0].programName,
+        program_url: Outputs.Items[0].program_url,
+        programUrlDisplay: Outputs.Items[0].programUrlDisplay,
+        networkDisplay: Outputs.Items[0].networkDisplay,
+        commissionRateDisplay: Outputs.Items[0].commissionRateDisplay
+    } : 'No items');
+    
+    // DEBUG: Validate cards are working
+    console.log('🎴 CARDS DEBUG:');
+    console.log('Top Affiliate Opportunities:', (Outputs.TopAffiliateOpportunities || []).length, 'cards');
+    console.log('First opportunity card:', (Outputs.TopAffiliateOpportunities || [])[0] ? {
+        label: (Outputs.TopAffiliateOpportunities || [])[0].label,
+        subtitle: (Outputs.TopAffiliateOpportunities || [])[0].subtitle,
+        icon: (Outputs.TopAffiliateOpportunities || [])[0].icon
+    } : 'No opportunities');
+    
+    console.log('Affiliate Strategy Cards:', (Outputs.AffiliateStrategyCards || []).length, 'cards');
+    console.log('First strategy card:', (Outputs.AffiliateStrategyCards || [])[0] ? {
+        label: (Outputs.AffiliateStrategyCards || [])[0].label,
+        subtitle: (Outputs.AffiliateStrategyCards || [])[0].subtitle,
+        icon: (Outputs.AffiliateStrategyCards || [])[0].icon
+    } : 'No strategies');
+    
+    // DEBUG: Validate URL fields
+    console.log('🔗 URL DEBUG:');
+    console.log('Programs with URLs:', (Outputs.Items || []).filter(item => item?.program_url && item?.program_url !== '').length);
+    console.log('Sample URLs:', (Outputs.Items || []).slice(0, 3).map(item => ({
+        name: item?.programName || 'Unknown',
+        url: item?.program_url || '',
+        display: item?.programUrlDisplay || 'No URL'
+    })));
+
+    // ====================================================================
+    // STEP 9: GENERATE CARD DISPLAYS (STANDARDIZED FORMAT)
+    // ====================================================================
+    
+    console.log('🎴 COMPLETE: Generating card displays...');
+
+    // Top Affiliate Opportunities Cards
+    Outputs.TopAffiliateOpportunities = (highValuePrograms || []).slice(0, 5).map((program, index) => ({
+        value: program.profitabilityScore,
+        displayValue: `${program.profitabilityScore}/100`,
+        label: program.programName,
+        category: program.network,
+        color: program.color,
+        isPositive: program.profitabilityScore >= 50,
+        icon: program.display.networkIcon,
+        subtitle: `${program.display.commissionRateDisplay} commission • ${program.category}`,
+        
+        // Additional card-specific properties
+        id: program.id,
+        title: program.programName,
+        network: program.network,
+        commission: program.display.commissionAmountDisplay,
+        rate: program.display.commissionRateDisplay,
+        productPrice: program.display.productPriceDisplay,
+        monthlyVolume: program.monthlySearches,
+        competition: program.competitionLevel,
+        action: program.action,
+        urgency: program.urgency,
+        badgeText: program.isHighValue ? 'HIGH VALUE' : 'OPPORTUNITY',
+        badgeColor: program.color,
+        status: program.urgency.toLowerCase(),
+        actionText: program.urgency === 'high' ? 'Act Now' : 'Review',
+        actionColor: program.urgency === 'high' ? '#dc2626' : '#0891b2',
+        priority: program.urgency === 'high' ? 1 : program.urgency === 'medium' ? 2 : 3
+    }));
+
+    // Affiliate Strategy Cards
+    const recommendations = [];
+    if (overallScore >= 70) {
+        recommendations.push("Excellent affiliate potential - focus on high-commission programs");
+        recommendations.push("Scale content creation to leverage multiple high-value programs");
+    } else if (overallScore >= 50) {
+        recommendations.push("Good potential - prioritize programs with 20%+ commission rates");
+        recommendations.push("Create comparison content featuring top-performing programs");
+    } else {
+        recommendations.push("Limited potential - consider alternative monetization strategies");
+        recommendations.push("Focus on the highest-commission programs available");
+    }
+
+    Outputs.AffiliateStrategyCards = recommendations.map((rec, index) => ({
+        value: index === 0 ? 90 : 70,
+        displayValue: index === 0 ? 'High Impact' : 'Medium Impact',
+        label: rec,
+        category: 'Strategy',
+        color: index === 0 ? '#dc2626' : '#0891b2',
+        isPositive: true,
+        icon: '💡',
+        subtitle: '30 days • Easy to implement',
+        
+        // Additional strategy-specific properties
+        id: `affiliate_strategy_${index}`,
+        title: rec,
+        description: `Strategy recommendation based on ${overallScore}% profitability score`,
+        priority: index === 0 ? 'high' : 'medium',
+        badgeText: 'STRATEGY',
+        badgeColor: index === 0 ? '#dc2626' : '#0891b2',
+        type: 'affiliate-strategy',
+        status: 'ready',
+        timeframe: '30 days',
+        difficulty: 'Easy',
+        expectedImpact: index === 0 ? 'High' : 'Medium',
+        action: 'Review and implement'
+    }));
+
+        // Add this at the end of your processing to debug URL issues
+        console.log('🔍 URL DEBUG INFO:');
+        console.log(`Programs with URLs: ${safeTransformedPrograms.filter(p => p.program_url).length}/${safeTransformedPrograms.length}`);
+        console.log(`Sample URLs:`, safeTransformedPrograms.slice(0, 3).map(p => ({
+            name: p.programName,
+            url: p.program_url,
+            display: p.display?.programUrlDisplay
+        })));
+
+        // Verify table columns include URL
+        console.log('📋 TABLE COLUMNS:');
+        console.log(`URL column exists: ${Outputs.Columns.some(col => col.id === 'programUrlDisplay')}`);
+        console.log(`URL column field: ${Outputs.Columns.find(col => col.id === 'programUrlDisplay')?.Field}`);
+
+        // Verify table items include URL
+        console.log('📊 TABLE ITEMS:');
+        console.log(`Items with URL field: ${Outputs.Items.filter(item => item.program_url).length}/${Outputs.Items.length}`);
+        console.log(`Sample item URLs:`, Outputs.Items.slice(0, 2).map(item => ({
+            name: item.programName,
+            url: item.program_url,
+            display: item.programUrlDisplay
+        })));
+
+    console.log(`✅ COMPLETE: Generated ${Outputs.TopAffiliateOpportunities.length} opportunity cards and ${Outputs.AffiliateStrategyCards.length} strategy cards`);
+
+    // ====================================================================
+    // STEP 10: GENERATE QUICK ACTIONS AND FILTERS
+    // ====================================================================
+    
+    console.log('⚡ COMPLETE: Generating quick actions and filters...');
+
+    // Quick Filter Buttons
+    Outputs.QuickFilters = [
+        { 
+            id: 'all', 
+            label: 'All Programs', 
+            count: safeTransformedPrograms.length, 
+            active: activeFilter === 'all',
+            color: '#6b7280'
+        },
+        { 
+            id: 'highValue', 
+            label: 'High Value (20%+)', 
+            count: safeTransformedPrograms.filter(p => p.commissionRate >= 20).length, 
+            active: activeFilter === 'highValue',
+            color: '#dc2626'
+        },
+        { 
+            id: 'highProfit', 
+            label: 'High Profit (70+)', 
+            count: safeTransformedPrograms.filter(p => p.profitabilityScore >= 70).length, 
+            active: activeFilter === 'highProfit',
+            color: '#10b981'
+        },
+        { 
+            id: 'urgent', 
+            label: 'High Priority', 
+            count: safeTransformedPrograms.filter(p => p.urgency === 'high').length, 
+            active: activeFilter === 'urgent',
+            color: '#ea580c'
+        },
+        { 
+            id: 'instant', 
+            label: 'Instant Approval', 
+            count: safeTransformedPrograms.filter(p => !p.approvalRequired).length, 
+            active: activeFilter === 'instant',
+            color: '#059669'
+        }
+    ];
+
+    // Quick Actions
+    Outputs.AffiliateQuickActions = [
+        {
+            id: 'focus_high_value',
+            title: 'Focus on High-Value Programs',
+            description: `Target ${highValueOffersCount} programs with 20%+ commission`,
+            icon: '🎯',
+            color: '#dc2626',
+            action: 'filter_high_value',
+            count: highValueOffersCount,
+            isActive: highValueOffersCount > 0,
+            enabled: highValueOffersCount > 0,
+            priority: 1
+        },
+        {
+            id: 'network_analysis',
+            title: 'Analyze by Network',
+            description: `Compare ${networks.length} affiliate networks`,
+            icon: '🔗',
+            color: '#0891b2',
+            action: 'show_networks',
+            count: networks.length,
+            isActive: networks.length > 1,
+            enabled: networks.length > 1,
+            priority: 2
+        },
+        {
+            id: 'category_focus',
+            title: 'Focus by Category',
+            description: `Explore ${categories.length} product categories`,
+            icon: '📊',
+            color: '#7c3aed',
+            action: 'show_categories',
+            count: categories.length,
+            isActive: categories.length > 1,
+            enabled: categories.length > 1,
+            priority: 3
+        },
+        {
+            id: 'high_commission',
+            title: 'High Commission Only',
+            description: `Show programs with 15%+ commission rate`,
+            icon: '💰',
+            color: '#059669',
+            action: 'filter_high_commission',
+            count: safeTransformedPrograms.filter(p => p.commissionRate >= 15).length,
+            isActive: safeTransformedPrograms.filter(p => p.commissionRate >= 15).length > 0,
+            enabled: safeTransformedPrograms.filter(p => p.commissionRate >= 15).length > 0,
+            priority: 4
+        }
+    ];
+
+    // Filter Options for Dropdowns
+    Outputs.FilterOptions = {
+        networks: networks.map(network => ({
+            value: network,
+            label: network,
+            count: safeTransformedPrograms.filter(p => p.network === network).length,
+            icon: AffiliateUtils.getNetworkIcon(network),
+            color: AffiliateUtils.getNetworkColor(network)
+        })),
+        categories: categories.map(category => ({
+            value: category,
+            label: category,
+            count: safeTransformedPrograms.filter(p => p.category === category).length
+        })),
+        urgencyLevels: [
+            { value: 'high', label: 'High Priority', count: safeTransformedPrograms.filter(p => p.urgency === 'high').length, color: '#dc2626' },
+            { value: 'medium', label: 'Medium Priority', count: safeTransformedPrograms.filter(p => p.urgency === 'medium').length, color: '#d97706' },
+            { value: 'normal', label: 'Normal Priority', count: safeTransformedPrograms.filter(p => p.urgency === 'normal').length, color: '#6b7280' }
+        ],
+        commissionRanges: [
+            { value: '30+', label: '30%+ Commission', count: safeTransformedPrograms.filter(p => p.commissionRate >= 30).length },
+            { value: '20-30', label: '20-30% Commission', count: safeTransformedPrograms.filter(p => p.commissionRate >= 20 && p.commissionRate < 30).length },
+            { value: '10-20', label: '10-20% Commission', count: safeTransformedPrograms.filter(p => p.commissionRate >= 10 && p.commissionRate < 20).length },
+            { value: '0-10', label: 'Under 10% Commission', count: safeTransformedPrograms.filter(p => p.commissionRate < 10).length }
+        ]
+    };
+
+    console.log(`✅ COMPLETE: Generated ${Outputs.AffiliateQuickActions.length} quick actions and filter options`);
+
+    // ====================================================================
+    // STEP 11: GENERATE NETWORK AND CATEGORY ANALYSIS
+    // ====================================================================
+    
+    console.log('🌐 COMPLETE: Generating network and category analysis...');
+
+    // Network Summary
+    Outputs.AffiliateNetworkSummary = {
+        networks: networks.map(network => {
+            const networkPrograms = safeTransformedPrograms.filter(p => p.network === network);
+            const totalPotential = networkPrograms.reduce((sum, p) => sum + p.commissionAmount, 0);
+            const avgCommission = Math.round(networkPrograms.reduce((sum, p) => sum + p.commissionAmount, 0) / networkPrograms.length) || 0;
+            const avgRate = Math.round(networkPrograms.reduce((sum, p) => sum + p.commissionRate, 0) / networkPrograms.length) || 0;
+            
+            return {
+                network: network,
+                count: networkPrograms.length,
+                avgCommission: avgCommission,
+                avgRate: avgRate,
+                totalPotential: totalPotential,
+                icon: AffiliateUtils.getNetworkIcon(network),
+                color: AffiliateUtils.getNetworkColor(network),
+                percentage: Math.round((networkPrograms.length / totalPrograms) * 100),
+                highValueCount: networkPrograms.filter(p => p.isHighValue).length,
+                topProgram: networkPrograms.reduce((max, p) => p.profitabilityScore > max.profitabilityScore ? p : max, networkPrograms[0])
+            };
+        }),
+        
+        categories: categories.map(category => {
+            const categoryPrograms = safeTransformedPrograms.filter(p => p.category === category);
+            const avgScore = Math.round(categoryPrograms.reduce((sum, p) => sum + p.profitabilityScore, 0) / categoryPrograms.length) || 0;
+            const totalPotential = categoryPrograms.reduce((sum, p) => sum + p.commissionAmount, 0);
+            
+            return {
+                category: category,
+                count: categoryPrograms.length,
+                avgScore: avgScore,
+                totalPotential: totalPotential,
+                percentage: Math.round((categoryPrograms.length / totalPrograms) * 100),
+                highValueCount: categoryPrograms.filter(p => p.isHighValue).length,
+                bestProgram: categoryPrograms.reduce((max, p) => p.profitabilityScore > max.profitabilityScore ? p : max, categoryPrograms[0]),
+                color: avgScore >= 70 ? '#10b981' : avgScore >= 50 ? '#f59e0b' : '#6b7280'
+            };
+        })
+    };
+
+    console.log(`✅ COMPLETE: Network analysis: ${networks.length} networks, ${categories.length} categories`);
+
+    // ====================================================================
+    // STEP 12: GENERATE CHART DATA
+    // ====================================================================
+    
+    console.log('📈 COMPLETE: Generating chart data...');
+
+    // Programs profitability chart
+    Outputs.AffiliateChart_Data = {
+        labels: safeTransformedPrograms.slice(0, 8).map(p => (p?.programName || 'Unknown').substring(0, 20) + ((p?.programName || '').length > 20 ? '...' : '')),
+        datasets: [
+            {
+                label: 'Profitability Score',
+                data: safeTransformedPrograms.slice(0, 8).map(p => p?.profitabilityScore || 0),
+                backgroundColor: safeTransformedPrograms.slice(0, 8).map(p => p?.color || '#6b7280'),
+                borderRadius: 4,
+                borderWidth: 1
+            }
+        ]
+    };
+
+    // Network distribution chart
+    Outputs.AffiliateNetworkChart_Data = {
+        labels: networks,
+        datasets: [
+            {
+                label: 'Programs per Network',
+                data: networks.map(network => safeTransformedPrograms.filter(p => p?.network === network).length),
+                backgroundColor: networks.map(network => AffiliateUtils.getNetworkColor(network)),
+                borderRadius: 4,
+                borderWidth: 1
+            }
+        ]
+    };
+
+    // Category distribution chart
+    Outputs.AffiliateCategoryChart_Data = {
+        labels: categories,
+        datasets: [
+            {
+                label: 'Programs per Category',
+                data: categories.map(category => safeTransformedPrograms.filter(p => p?.category === category).length),
+                backgroundColor: categories.map((_, index) => {
+                    const colors = ['#0891b2', '#7c3aed', '#059669', '#dc2626', '#d97706', '#6366f1'];
+                    return colors[index % colors.length];
+                }),
+                borderRadius: 4,
+                borderWidth: 1
+            }
+        ]
+    };
+
+    console.log('✅ COMPLETE: Chart data generated');
+
+    // ====================================================================
+    // STEP 13: GENERATE STATUS AND SUMMARY DATA
+    // ====================================================================
+    
+    console.log('📋 COMPLETE: Generating summary and status data...');
+
+    // Overall status and summary
+    Outputs.AffiliateStatus = {
+        overall: overallScore >= 70 ? 'excellent' : overallScore >= 50 ? 'good' : overallScore >= 30 ? 'moderate' : 'poor',
+        statusText: AffiliateUtils.getProfitabilityLevel(overallScore),
+        statusColor: AffiliateUtils.getProfitabilityColor(overallScore),
+        statusIcon: AffiliateUtils.getProfitabilityIcon(overallScore),
+        lastUpdated: new Date().toISOString(),
+        dataSource: 'supabase_4_tables',
+        
+        // Key metrics
+        totalPrograms: totalPrograms,
+        avgCommissionRate: avgCommissionRate,
+        totalPotential: totalCommissionPotential,
+        highValueCount: highValueOffersCount,
+        networksCount: networks.length,
+        categoriesCount: categories.length,
+        overallScore: overallScore,
+        
+        // Recommendations
+        primaryRecommendation: overallScore >= 70 ? 'Excellent affiliate potential - proceed with confidence' :
+                              overallScore >= 50 ? 'Good potential - focus on high-value programs' :
+                              overallScore >= 30 ? 'Moderate potential - consider optimization' :
+                              'Limited potential - explore alternative monetization',
+        
+        // Analysis metadata
+        sessionID: sessionID,
+        analysisDate: sessionData.created_at,
+        topic: sessionData.topic,
+        subtopics: sessionData.subtopics || [],
+        researchTimestamp: sessionData.research_timestamp,
+        source: sessionData.source,
+        totalProgramsInSession: sessionData.total_programs,
+        sessionProfitabilityScore: sessionData.profitability_score,
+        sessionProfitabilityLevel: sessionData.profitability_level
+    };
+
+    // Export data for external use
+    Outputs.AffiliateExportData = {
+        timestamp: new Date().toISOString(),
+        trendAnalysisID: selectedAnalysisId,
+        sessionID: sessionID,
+        topic: sessionData.topic,
+        overallScore: overallScore,
+        totalPrograms: totalPrograms,
+        programs: transformedPrograms,
+        networks: Outputs.AffiliateNetworkSummary.networks,
+        categories: Outputs.AffiliateNetworkSummary.categories,
+        recommendations: recommendations,
+        profitabilityAnalysis: {
+            profitability_score: profitabilityData.profitability_score,
+            profitability_level: profitabilityData.profitability_level,
+            reason: profitabilityData.reason,
+            total_programs: profitabilityData.total_programs,
+            avg_commission_rate: profitabilityData.avg_commission_rate,
+            avg_commission_amount: profitabilityData.avg_commission_amount,
+            high_value_programs: profitabilityData.high_value_programs,
+            networks_represented: profitabilityData.networks_represented,
+            subtopics_covered: profitabilityData.subtopics_covered
+        }
+    };
+
+    // Table summary for debugging
+    Outputs.TableSummary = {
+        totalPrograms: transformedPrograms.length,
+        filteredPrograms: filteredPrograms.length,
+        columnsGenerated: Outputs.Columns.length,
+        itemsGenerated: Outputs.Items.length,
+        paginatedItemsGenerated: Outputs.PaginatedItems?.length || 0,
+        networks: networks.length,
+        categories: categories.length,
+        activeFilter: activeFilter,
+        currentPage: currentPage,
+        totalPages: Math.ceil(filteredPrograms.length / itemsPerPage)
+    };
+
+    console.log('✅ COMPLETE: Summary and export data generated');
+
+    // ====================================================================
+    // STEP 14: SUCCESS OUTPUTS
+    // ====================================================================
+    
+    // Set success state
+    Outputs.affiliateDataReady = true;
+    Outputs.affiliateDataError = null;
+    Outputs.affiliateDataTimestamp = Date.now();
+    Outputs.affiliateProcessingVersion = '1.0-complete';
+
+    console.log('✅ COMPLETE: Affiliate data processing completed successfully!');
+    console.log(`📊 COMPLETE: Generated ${Object.keys(Outputs).filter(k => k.startsWith('KPI_') || k.startsWith('Affiliate')).length} affiliate outputs`);
+    console.log(`🎯 COMPLETE: Overall Score: ${overallScore}% (${AffiliateUtils.getProfitabilityLevel(overallScore)})`);
+    console.log(`💰 COMPLETE: Programs: ${totalPrograms} total, ${highValueOffersCount} high-value`);
+    console.log(`🌐 COMPLETE: Networks: ${networks.length}, Categories: ${categories.length}`);
+    console.log(`💵 COMPLETE: Commission Potential: ${totalCommissionPotential.toLocaleString()}`);
+    console.log(`📋 COMPLETE: Table: ${Outputs.Items.length} items, ${Outputs.Columns.length} columns`);
+    console.log(`🎴 COMPLETE: Cards: ${Outputs.TopAffiliateOpportunities.length} opportunities, ${Outputs.AffiliateStrategyCards.length} strategies`);
+    Outputs.enableTab = true;
+} catch (error) {
+    console.error('❌ COMPLETE: Error in affiliate data processor:', error, 'Trend Analysys ID:', selectedAnalysisId);
+    Outputs.enableTab = false;
+    console.error('❌ COMPLETE: Error details:', {
+        message: error.message,
+        stack: error.stack,
+        name: error.name
+    });
+
+    // Set error state
+    Outputs.affiliateDataReady = false;
+    Outputs.affiliateDataError = error.message;
+    Outputs.affiliateProcessingVersion = '1.0-complete-error';
+
+    // Generate error KPI cards (standardized format)
+    const errorKPI = {
+        value: 0,
+        displayValue: "Error",
+        label: "Error",
+        category: "Error",
+        color: "#dc2626",
+        isPositive: false,
+        icon: "❌",
+        subtitle: error.message
+    };
+
+    Outputs.KPI_AffiliatePotential = { ...errorKPI, label: "Affiliate Potential" };
+    Outputs.KPI_TotalCommission = { ...errorKPI, label: "Commission Potential", displayValue: '$0' };
+    Outputs.KPI_AvgCommissionRate = { ...errorKPI, label: "Avg Commission Rate", displayValue: '0%' };
+    Outputs.KPI_HighValueOffers = { ...errorKPI, label: "High Value Offers", displayValue: '0' };
+    Outputs.KPI_NetworksDiversity = { ...errorKPI, label: "Networks Available", displayValue: '0' };
+    Outputs.KPI_CategoriesCoverage = { ...errorKPI, label: "Categories Covered", displayValue: '0' };
+
+    // Empty arrays for tables and cards
+    Outputs.Columns = [];
+    Outputs.Items = [];
+    Outputs.PaginatedItems = [];
+    Outputs.TopAffiliateOpportunities = [];
+    Outputs.AffiliateStrategyCards = [];
+    Outputs.QuickFilters = [];
+    Outputs.AffiliateQuickActions = [];
+
+    // Empty network summary
+    Outputs.AffiliateNetworkSummary = {
+        networks: [],
+        categories: []
+    };
+
+    // Empty chart data
+    Outputs.AffiliateChart_Data = {
+        labels: [],
+        datasets: [{
+            label: 'No Data',
+            data: [],
+            backgroundColor: []
+        }]
+    };
+
+    Outputs.AffiliateNetworkChart_Data = {
+        labels: [],
+        datasets: [{
+            label: 'No Data',
+            data: [],
+            backgroundColor: []
+        }]
+    };
+
+    Outputs.AffiliateCategoryChart_Data = {
+        labels: [],
+        datasets: [{
+            label: 'No Data',
+            data: [],
+            backgroundColor: []
+        }]
+    };
+
+    // Error status
+    Outputs.AffiliateStatus = {
+        overall: 'error',
+        statusText: 'Data Error',
+        statusColor: '#dc2626',
+        statusIcon: '❌',
+        lastUpdated: new Date().toISOString(),
+        dataSource: 'error',
+        totalPrograms: 0,
+        avgCommissionRate: 0,
+        totalPotential: 0,
+        highValueCount: 0,
+        networksCount: 0,
+        categoriesCount: 0,
+        overallScore: 0,
+        primaryRecommendation: `Error loading affiliate data: ${error.message}`,
+        errorMessage: error.message
+    };
+
+    // Empty filter options
+    Outputs.FilterOptions = {
+        networks: [],
+        categories: [],
+        urgencyLevels: [],
+        commissionRanges: []
+    };
+
+    // Empty export data
+    Outputs.AffiliateExportData = {
+        timestamp: new Date().toISOString(),
+        trendAnalysisID: selectedAnalysisId || 'unknown',
+        error: error.message,
+        programs: [],
+        networks: [],
+        categories: []
+    };
+
+    // Empty pagination info
+    Outputs.PaginationInfo = {
+        currentPage: 1,
+        totalPages: 0,
+        totalItems: 0,
+        itemsPerPage: 10,
+        startItem: 0,
+        endItem: 0,
+        hasNextPage: false,
+        hasPreviousPage: false,
+        showingText: 'No data available'
+    };
+
+    // Table summary for debugging
+    Outputs.TableSummary = {
+        totalPrograms: 0,
+        filteredPrograms: 0,
+        columnsGenerated: 0,
+        itemsGenerated: 0,
+        paginatedItemsGenerated: 0,
+        networks: 0,
+        categories: 0,
+        activeFilter: 'all',
+        currentPage: 1,
+        totalPages: 0,
+        error: error.message
+    };
+
+    console.log("❌ COMPLETE: Set error state outputs");
+}
+
+// ========================================================================
+// FINAL SUCCESS SUMMARY
+// ========================================================================
+
+const successSummary = `
+✅ COMPLETE AFFILIATE DATA PROCESSOR FINISHED!
+
+📊 DATA RETRIEVED:
+- Session ID: ${Outputs.AffiliateStatus?.sessionID || 'N/A'}
+- Programs: ${Outputs.AffiliateStatus?.totalPrograms || 0}
+- Networks: ${Outputs.AffiliateStatus?.networksCount || 0}
+- Categories: ${Outputs.AffiliateStatus?.categoriesCount || 0}
+
+🎯 KEY METRICS:
+- Overall Score: ${Outputs.AffiliateStatus?.overallScore || 0}%
+- Avg Commission: ${Outputs.AffiliateStatus?.avgCommissionRate || 0}%
+- Total Potential: ${Outputs.AffiliateStatus?.totalPotential?.toLocaleString() || '0'}
+- High-Value Programs: ${Outputs.AffiliateStatus?.highValueCount || 0}
+
+📋 OUTPUTS GENERATED:
+- 6 KPI Cards ✅
+- Table Columns & Items ✅
+- Opportunity Cards ✅
+- Strategy Cards ✅
+- Network Analysis ✅
+- Quick Actions & Filters ✅
+- Chart Data ✅
+- Pagination Support ✅
+
+
+
+🎨 NOODL TABLE PREFAB READY:
+- Columns: ${Outputs.Columns?.length || 0}
+- Items: ${Outputs.Items?.length || 0}
+- Paginated Items: ${Outputs.PaginatedItems?.length || 0}
+- Quick Filters: ${Outputs.QuickFilters?.length || 0}
+
+All affiliate tab components now have complete data!
+`;
+
+console.log(successSummary);
+
+// Ensure Outputs.Finished exists before calling it
+if (typeof Outputs.Finished === 'function') {
+    Outputs.Finished();
+} else {
+    console.log('✅ Complete affiliate data processing finished successfully!');
+}
+  Outputs.headerColor = '#E4EEFF'

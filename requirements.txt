@@ -1,0 +1,280 @@
+# Blog Gap Analyzer - Enhanced Requirements with Trend Research
+# Updated dependencies for the modular structure + Enhanced Step 1
+
+# =====================================================
+# WEB FRAMEWORK & API
+# =====================================================
+flask>=2.3.0
+flask-cors>=4.0.0
+gunicorn>=21.0.0  # Production WSGI server
+
+# =====================================================
+# AI/ML FRAMEWORKS
+# =====================================================
+crewai>=0.1.55            # Updated for better stability
+pydantic>=2.5.0           # Updated for CrewAI compatibility
+
+# =====================================================
+# LLM PROVIDERS
+# =====================================================
+# OpenAI
+openai>=1.12.0            # Updated for latest features
+
+# Anthropic Claude
+anthropic>=0.18.0
+
+# Google Gemini
+google-generativeai>=0.3.0
+
+# DeepSeek (via OpenAI-compatible API)
+# Uses openai library with custom endpoint
+
+# =====================================================
+# HTTP & WEB REQUESTS
+# =====================================================
+requests>=2.31.0
+httpx>=0.25.0
+aiohttp>=3.8.0
+
+# =====================================================
+# DATA PROCESSING & VALIDATION
+# =====================================================
+pandas>=2.0.0
+numpy>=1.24.0
+pydantic[email]>=2.5.0    # Extended pydantic features
+
+# =====================================================
+# ENHANCED TREND RESEARCH DEPENDENCIES
+# =====================================================
+# Web scraping and content analysis
+beautifulsoup4>=4.12.0    # For parsing web content from search results
+lxml>=4.9.0               # Fast XML/HTML parser
+textstat>=0.7.0           # Text readability and complexity analysis
+
+# Advanced NLP for trend analysis
+nltk>=3.8.0               # Natural language processing
+# spacy>=3.7.0            # Advanced NLP (uncomment for better trend analysis)
+# python -m spacy download en_core_web_sm
+
+# Scientific computing for trend scoring
+scipy>=1.11.0             # Statistical analysis
+scikit-learn>=1.3.0       # ML algorithms for trend prediction
+
+# API management and reliability
+tenacity>=8.2.0           # Robust retry mechanisms
+ratelimit>=2.2.0          # API rate limiting
+asyncio-throttle>=1.0.2   # Async rate limiting
+aioretry>=6.0.0           # Async retry mechanisms
+
+# Text processing enhancements
+python-dateutil>=2.8.0   # Date parsing for trend timelines
+fuzzywuzzy>=0.18.0        # Fuzzy string matching for topic clustering
+python-levenshtein>=0.21.0 # Fast string similarity calculations
+
+# =====================================================
+# CONFIGURATION & ENVIRONMENT
+# =====================================================
+python-dotenv>=1.0.0
+pyyaml>=6.0               # For YAML output format
+
+# =====================================================
+# ASYNC SUPPORT
+# =====================================================
+asyncio>=3.4.3            # Usually built-in
+aiofiles>=23.0.0
+
+# =====================================================
+# LOGGING & MONITORING
+# =====================================================
+structlog>=23.0.0         # Better structured logging
+colorlog>=6.7.0           # Colored console output
+
+# =====================================================
+# CLI INTERFACE
+# =====================================================
+click>=8.1.0              # Enhanced CLI framework (alternative to argparse)
+rich>=13.0.0              # Rich console output for CLI
+tabulate>=0.9.0           # Table formatting
+
+# =====================================================
+# TESTING FRAMEWORK
+# =====================================================
+pytest>=7.0.0
+pytest-asyncio>=0.21.0
+pytest-mock>=3.10.0
+pytest-cov>=4.0.0        # Coverage reporting
+pytest-flask>=1.2.0      # Flask testing utilities
+
+# =====================================================
+# CODE QUALITY & DEVELOPMENT
+# =====================================================
+black>=23.0.0             # Code formatting
+isort>=5.12.0             # Import sorting
+flake8>=6.0.0             # Linting
+mypy>=1.0.0               # Type checking
+pre-commit>=3.0.0         # Git hooks
+
+# =====================================================
+# DOCUMENTATION
+# =====================================================
+sphinx>=7.0.0             # Documentation generation
+sphinx-rtd-theme>=1.3.0   # ReadTheDocs theme
+
+# =====================================================
+# CACHING & PERFORMANCE
+# =====================================================
+redis>=4.5.0              # For caching LLM responses
+diskcache>=5.6.0          # Local file-based caching
+cachetools>=5.3.0         # Advanced caching utilities
+python-redis-lock>=4.0.0 # Distributed locking for cache consistency
+
+# Memory and performance monitoring
+psutil>=5.9.0             # System resource monitoring
+memory-profiler>=0.61.0   # Memory usage tracking
+
+# =====================================================
+# SECURITY
+# =====================================================
+cryptography>=41.0.0     # For secure token handling
+
+supabase 
+fastapi 
+uvicorn 
+python-dotenv
+pytrends
+linkup-sdk
+
+
+# =====================================================
+# OPTIONAL ENHANCEMENTS
+# =====================================================
+# Database support (if storing results)
+# sqlalchemy>=2.0.0
+# alembic>=1.11.0         # Database migrations
+
+# Enhanced text processing (uncomment for advanced analysis)
+# spacy>=3.7.0
+# python -m spacy download en_core_web_sm
+
+# Job scheduling (for batch processing)
+# celery>=5.3.0
+# redis>=4.5.0            # Celery broker
+
+# API documentation (uncomment if needed)
+# flask-restx>=1.3.0      # Swagger/OpenAPI docs
+# flasgger>=0.9.5         # Alternative Swagger integration
+
+# Monitoring and metrics (uncomment for production)
+# prometheus-client>=0.17.0
+# flask-monitoring-dashboard>=3.1.0
+# sentry-sdk[flask]>=1.40.0  # Error monitoring
+
+# =====================================================
+# LINKUP API INTEGRATION (OPTIONAL)
+# =====================================================
+# If using Linkup for real-time web search:
+# linkup-api>=1.0.0       # Official Linkup client (if available)
+# Alternative: use requests with proper headers
+
+# =====================================================
+# DEVELOPMENT DEPENDENCIES
+# =====================================================
+# Install with: pip install -r requirements.txt -r requirements-dev.txt
+
+# requirements-dev.txt would contain:
+# jupyter>=1.0.0
+# ipython>=8.0.0
+# notebook>=6.5.0
+# python-debugpy>=1.6.0
+
+# =====================================================
+# PRODUCTION DEPENDENCIES
+# =====================================================
+# For production deployment, consider:
+# sentry-sdk[flask]>=1.40.0  # Error monitoring
+# newrelic>=8.10.0           # APM monitoring
+# uwsgi>=2.0.21              # Alternative to gunicorn
+
+# =====================================================
+# PLATFORM-SPECIFIC NOTES
+# =====================================================
+# Windows users:
+# pip install --upgrade setuptools wheel
+
+# Mac users with Apple Silicon:
+# export ARCHFLAGS="-arch arm64"
+# pip install --upgrade pip
+
+# Production installation:
+# pip install --no-cache-dir -r requirements.txt
+
+# =====================================================
+# INSTALLATION COMMANDS
+# =====================================================
+# Development setup:
+# python -m venv venv
+# source venv/bin/activate  # Linux/Mac
+# venv\Scripts\activate     # Windows
+# pip install -r requirements.txt
+
+# Enhanced trend research setup:
+# pip install -r requirements.txt
+# python -c "import nltk; nltk.download('punkt')"
+# python -c "import nltk; nltk.download('stopwords')"
+
+# With development tools:
+# pip install -r requirements.txt
+# pip install -e .  # If you have setup.py
+
+# Docker setup:
+# COPY requirements.txt .
+# RUN pip install --no-cache-dir -r requirements.txt
+
+# =====================================================
+# VERSION PINNING STRATEGY
+# =====================================================
+# Using >= for most packages to allow compatible updates
+# Critical packages may need exact versions in production:
+# crewai==0.1.55
+# pydantic==2.5.2
+# flask==2.3.3
+# openai==1.12.0
+
+# Lock versions with:
+# pip freeze > requirements-lock.txt
+
+# =====================================================
+# ENVIRONMENT SETUP FOR ENHANCED FEATURES
+# =====================================================
+# Required environment variables:
+# - RAG_SERVICE_URL
+# - OPENAI_API_KEY (or other LLM provider keys)
+
+# Optional for enhanced trend research:
+# - LINKUP_API_KEY (for real-time web search)
+# - GOOGLE_TRENDS_API_KEY (for Google Trends data)
+# - ANTHROPIC_API_KEY (alternative LLM)
+# - DEEPSEEK_API_KEY (alternative LLM)
+# - GEMINI_API_KEY (alternative LLM)
+
+# Performance and caching:
+# - ENABLE_CACHING=true
+# - CACHE_TTL_HOURS=6
+# - CIRCUIT_BREAKER_THRESHOLD=5
+# - REDIS_URL (if using Redis caching)
+
+# Optional environment variables:
+# - HOST (default: 0.0.0.0)
+# - PORT (default: 8000)
+# - DEBUG (default: true)
+# - MAX_BLOG_IDEAS (default: 20)
+
+# =====================================================
+# INSTALLATION VERIFICATION
+# =====================================================
+# Verify installation:
+# python -c "import crewai, pydantic, openai, flask; print('Core dependencies OK')"
+# python -c "import beautifulsoup4, nltk, scipy; print('Enhanced features OK')"
+
+# Test enhanced trend research:
+# python trend_research_step1.py --test "AI marketing"
